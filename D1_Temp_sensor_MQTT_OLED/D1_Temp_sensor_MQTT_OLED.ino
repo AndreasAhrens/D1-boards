@@ -9,7 +9,7 @@
 #include <Adafruit_GFX.h>
 #include "Adafruit_SSD1306.h"
 
-#define DHTPIN D4     // what pin we're connected to
+#define DHTPIN D4     // what pin DHT is connected to
 #define DHTTYPE DHT22   // DHT 22  (AM2302)
  
 DHT dht(DHTPIN, DHTTYPE);
@@ -30,7 +30,8 @@ Adafruit_SSD1306 display(OLED_RESET);
 #define LOGO16_GLCD_WIDTH  16
 */
 
-const char* mqtt_server = "192.168.31.68";
+const char* mqtt_server = "192.168.31.68"; 
+// This is my MQTT server, your IP will most likely be different
 WiFiClient client;
 PubSubClient mqttclient(client);
 
