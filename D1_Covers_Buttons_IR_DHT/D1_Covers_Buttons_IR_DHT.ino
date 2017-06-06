@@ -16,16 +16,21 @@
   #define DHTTYPE DHT22   // DHT 22  (AM2302)
   DHT dht(DHTPIN, DHTTYPE);
 
-
-  String temp_str;
-  char temp_char[50];
-
+  // Networks & MQTT
+  const char* mqtt_server = "192.168.31.68"; 
+  // This is my MQTT server, your IP will most likely be different
+  const char* mqtt_client = "Bedroom_Sensor_1";
+  
   // Buttons
   //int goodNight = 4;
   //int goodMorning = 5;
   int movementSensor = 12; 
   int buttonUp= 5 ; // define the button pin
   int buttonDown = 4;
+
+  long longPressTime = 250;
+  const long upInterval = 13000;    // Time to roll up curtain, 13 seconds
+  const long downInterval = 11210;  // Time to roll down curtain, lower since down uses less power
 
   eBtn btnUp = eBtn(buttonUp);
   eBtn btnDown = eBtn(buttonDown);
@@ -37,17 +42,13 @@
   boolean coverStatus = false;
   boolean justStarted = true;
 
-  // Networks & MQTT
-  const char* mqtt_server = "192.168.31.68"; 
-  // This is my MQTT server, your IP will most likely be different
+  
   WiFiClient client;
   PubSubClient mqttclient(client);
 
    
-  //char msg[50];
   unsigned long startMillis = 0;
-  const long upInterval = 13000;    // Time to roll up curtain, 13 seconds
-  const long downInterval = 11210;  // Time to roll down curtain, lower since down uses less power
+  
 
   // Motion detector 
   int previousDetectorValue = 0; // Initial status for previous value
@@ -60,14 +61,11 @@
   boolean buttonActive = false;
   boolean longPressActive = false;
   long buttonTimer = 0;
-  long longPressTime = 250;
 
   int servoValue = 0;
 
-
-//  String temp_str;
-//  char temp_char[50];
-
+  String temp_str;
+  char temp_char[50];
 void setup() {
   // put your setup code here, to run once:
   Serial.begin(115200);
@@ -249,7 +247,7 @@ void reconnect() {
     Serial.print("Attempting MQTT connection...");
     // Attempt to connect
     // The client name nas to be changed for each new node!
-    if (mqttclient.connect("Bedroom_Sensor_1")) {
+    if (mqttclient.connect(mqtt_client)) {
       Serial.println("connected");
       mqttclient.subscribe("/inside/bedroom/cover/set");
     } else {
