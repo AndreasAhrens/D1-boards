@@ -29,6 +29,7 @@
   int pressUp = 0;
   int pressDown = 0;
   boolean coverStatus = false;
+  boolean justStarted = true;
 
   // Networks & MQTT
   const char* mqtt_server = "192.168.31.68"; 
@@ -38,7 +39,9 @@
 
   char msg[50];
   unsigned long startMillis = 0;
-  const long changeInterval = 2500;   
+  const long upInterval = 13000;
+  const long downInterval = 11210;
+  const long changeInterval = 10000;   
 
   int previousDetectorValue = 0;
   int currentDetectorValue = 1;
@@ -90,15 +93,16 @@ void callback(char* topic, byte* payload, unsigned int length) {
   Serial.print("Cover status  ");
   Serial.println(coverStatus);
   // If topic is 1, close fully
-  if ((char)payload[0] == '1' && coverStatus == false) { 
+  if (((char)payload[0] == '1')  && coverStatus == false && justStarted == false) { 
     Serial.println("Closing cover");
     startMillis = millis();
     Serial.print("Start millis");
     Serial.println(startMillis);
     Serial.println("Closing");
-    while(millis() - startMillis < changeInterval) {
+    while(millis() - startMillis < downInterval) {
       servo1.attach(servoPin);
       servo1.write(180);
+      yield();
       
     }
     mqttclient.publish("/inside/bedroom/cover/", "CLOSED");  // Notify MQTT    
@@ -107,17 +111,21 @@ void callback(char* topic, byte* payload, unsigned int length) {
     coverStatus = true;
     Serial.print("Cover status  ");
     Serial.println(coverStatus);
+    // justStarted is set at system reboot. If this is not here, it's only possible to close after restart.
+    justStarted = false;
   }
   // If payload is 0 open fully
-  else if ((char)payload[0] == '0' && coverStatus == true) {
+  else if (((char)payload[0] == '0') && (coverStatus == true || justStarted == true)) {
     Serial.println("Opening cover");
     startMillis = millis();
     Serial.print("Start millis");
     Serial.println(startMillis);
     Serial.println("Opening");
-    while(millis() - startMillis < changeInterval) {
+    while(millis() - startMillis < upInterval) {
       servo1.attach(servoPin);
       servo1.write(0);
+      // If we don't use yield, the Watchdog trips for some reason.
+      yield();
       
     }
     mqttclient.publish("/inside/bedroom/cover/", "OPEN");  // Notify MQTT    
@@ -132,6 +140,7 @@ void callback(char* topic, byte* payload, unsigned int length) {
     Serial.print((char)payload[0]);
     Serial.print(", cover status  ");
     Serial.print(coverStatus);
+    justStarted = false;
   }
 
 }
@@ -217,7 +226,7 @@ void loop() {
 
       } else {
         mqttclient.publish("/inside/bedroom/cover/set", "0");
-        //Serial.println("Up Short Press");
+        Serial.println("Up Short Press");
 
       }
 
@@ -231,6 +240,7 @@ void loop() {
     servo1.attach(servoPin);
     //Serial.println("Up pressed");
     servo1.write(0);  // Values below 90 rotate one way, values above 90 rotate the other
+    yield();
     if(digitalRead(buttonUp) == 1) {
       upLongPressActive = false;
       upButtonActive = false;
@@ -260,7 +270,7 @@ if (digitalRead(buttonDown) == 0) {
 
       } else {
         mqttclient.publish("/inside/bedroom/cover/set", "1");
-        //Serial.println("down Short Press");
+        Serial.println("down Short Press");
 
       }
 
@@ -274,6 +284,7 @@ if (digitalRead(buttonDown) == 0) {
     servo1.attach(servoPin);
     //Serial.println("down pressed");
     servo1.write(180);  // Values below 90 rotate one way, values above 90 rotate the other
+    yield();
     if(digitalRead(buttonDown) == 1) {
       downLongPressActive = false;
       downButtonActive = false;
@@ -288,7 +299,7 @@ if (digitalRead(buttonDown) == 0) {
     if (currentDetectorValue != previousDetectorValue) {
       detector_str = String(currentDetectorValue); //converting to string
       detector_str.toCharArray(detector_char, detector_str.length() + 1); //packaging up the data in order to publish to MQTT
-      mqttclient.publish("/inside/bedroom/movement", detector_char);
+      mqttclient.publish("/inside/bedroom/movement/", detector_char);
       Serial.print("Sensor value: ");
       Serial.println(currentDetectorValue);
       previousDetectorValue = currentDetectorValue;
