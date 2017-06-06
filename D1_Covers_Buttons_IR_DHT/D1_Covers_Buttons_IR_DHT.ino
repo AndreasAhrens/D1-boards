@@ -16,7 +16,6 @@
   DHT dht(DHTPIN, DHTTYPE);
   String temp_str;
   char temp_char[50];
-
   String hum_str;
   char hum_char[50];
 
@@ -37,20 +36,21 @@
   WiFiClient client;
   PubSubClient mqttclient(client);
 
+   
   char msg[50];
   unsigned long startMillis = 0;
-  const long upInterval = 13000;
-  const long downInterval = 11210;
-  const long changeInterval = 10000;   
+  const long upInterval = 13000;    // Time to roll up curtain, 13 seconds
+  const long downInterval = 11210;  // Time to roll down curtain, lower since down uses less power
 
-  int previousDetectorValue = 0;
-  int currentDetectorValue = 1;
+  // Motion detector 
+  int previousDetectorValue = 0; // Initial status for previous value
+  int currentDetectorValue = 1;  // Initial status for current value 
   String detector_str;
   char detector_char[50];
  
 
 
-  // Long and short press detection
+  // Long and short press detection with timings
   boolean upButtonActive = false;
   boolean upLongPressActive = false;
   long upButtonTimer = 0;
@@ -70,11 +70,14 @@ void setup() {
   mqttclient.setServer(mqtt_server, 1883);    // Connect to MQTT Server
   mqttclient.setCallback(callback);           // And set the callback
   dht.begin();
-  
+
+  // Set pinmodes for the buttons and the sensor
   pinMode(buttonUp, INPUT_PULLUP);
   pinMode(buttonDown, INPUT_PULLUP);
   pinMode(movementSensor, INPUT);
-  
+
+
+  // Attach the servo and set initial status
   servo1.attach(servoPin);
   coverStatus = false;
   Serial.print("Setup Done");
@@ -92,35 +95,32 @@ void callback(char* topic, byte* payload, unsigned int length) {
   }
   Serial.print("Cover status  ");
   Serial.println(coverStatus);
-  // If topic is 1, close fully
+  
+  // If topic is 1, close fully. We also check if the coverStatus (previous status) was up or down.
+  // This way, we can never send an Open command if it's already open and can never send an 
+  // Close command if it's already closed. If just started, don't roll down.
   if (((char)payload[0] == '1')  && coverStatus == false && justStarted == false) { 
     Serial.println("Closing cover");
-    startMillis = millis();
-    Serial.print("Start millis");
-    Serial.println(startMillis);
-    Serial.println("Closing");
+    startMillis = millis(); // Set start time
+    // Run as long as it's not fully Closed
     while(millis() - startMillis < downInterval) {
       servo1.attach(servoPin);
       servo1.write(180);
-      yield();
+      yield(); // needed to make sure the Watchdog doesn't time out. Doesn't do anything else.
       
     }
     mqttclient.publish("/inside/bedroom/cover/", "CLOSED");  // Notify MQTT    
-    servo1.detach();  // Stop the rotation
+    servo1.detach();  // Stop the rotation when done
     Serial.println("Fully Closed");
     coverStatus = true;
-    Serial.print("Cover status  ");
-    Serial.println(coverStatus);
     // justStarted is set at system reboot. If this is not here, it's only possible to close after restart.
     justStarted = false;
   }
-  // If payload is 0 open fully
+  
+  // If payload is 0 open fully. The rest, same as above but inverted.
   else if (((char)payload[0] == '0') && (coverStatus == true || justStarted == true)) {
     Serial.println("Opening cover");
     startMillis = millis();
-    Serial.print("Start millis");
-    Serial.println(startMillis);
-    Serial.println("Opening");
     while(millis() - startMillis < upInterval) {
       servo1.attach(servoPin);
       servo1.write(0);
@@ -132,8 +132,6 @@ void callback(char* topic, byte* payload, unsigned int length) {
     servo1.detach();  // Stop the rotation
     Serial.println("Fully Open");
     coverStatus = false;
-    Serial.print("Cover status  ");
-    Serial.println(coverStatus);
   }
   else {
     Serial.print("Payload ");
@@ -168,10 +166,11 @@ void reconnect() {
 
 void loop() {
   mqttclient.loop(); // Do the MQTT loop
-  pressUp = digitalRead(buttonUp);
+  pressUp = digitalRead(buttonUp); // Set pressUp to the vlaue of button Up. Same below for Down.
   pressDown = digitalRead(buttonDown);
 
   // Humidity and temperature init
+  // The damn DHT doesn't work for some reason, so comment out until I have time to fix.
   //float h = dht.readHumidity();
   //float t = dht.readTemperature();
 
@@ -196,35 +195,42 @@ void loop() {
   if (!client.connected()) {
     reconnect();
   }
-
-  //temp_str = String(t); //converting to string
-  //temp_str.toCharArray(temp_char, temp_str.length() + 1); //packaging up the data in order to publish to MQTT
-  //mqttclient.publish("/inside/bedroom/temperature/", temp_char);
+  /*
+  temp_str = String(t); //converting to string
+  temp_str.toCharArray(temp_char, temp_str.length() + 1); //packaging up the data in order to publish to MQTT
+  mqttclient.publish("/inside/bedroom/temperature/", temp_char);
   //delay(2000);
-  //hum_str = String(h); //converting to string
-  //hum_str.toCharArray(hum_char, hum_str.length() + 1); //packaging up the data in order to publish to MQTT
-  //mqttclient.publish("/inside/bedroom/humidity/", hum_char);
-  //Serial.print("Humidity ");
-  //Serial.println(hum_char);
+  hum_str = String(h); //converting to string
+  hum_str.toCharArray(hum_char, hum_str.length() + 1); //packaging up the data in order to publish to MQTT
+  mqttclient.publish("/inside/bedroom/humidity/", hum_char);
+  Serial.print("Humidity ");
+  Serial.println(hum_char);
+  */
 
+  // If the Up button is pressed (registers as 0 for some reason), run this if.
   if (digitalRead(buttonUp) == 0) {
     if (upButtonActive == false) {
       upButtonActive = true;
       upButtonTimer = millis();
+      // If not set as active, do that, and record start time to detect if press is long or short.
     }
     if ((millis() - upButtonTimer > upLongPressTime) && (upLongPressActive == false)) {
+      // If the time it has been active is longer than the upLongPressTime, register as long press
       upLongPressActive = true;
       Serial.println("Up Long Press");
     }
   } else {
 
     if (upButtonActive == true) {
-
+      // If button is active and long press is active, set long press active to false
       if (upLongPressActive == true) {
 
         upLongPressActive = false;
 
       } else {
+        // If not, it's short press. Publish to MQTT. 
+        // All actions are done via MQTT rather than directly so we can treat commands from buttons and 
+        // Home Assistant the same and reduce complexity. Downside - reliant on MQTT server being up.
         mqttclient.publish("/inside/bedroom/cover/set", "0");
         Serial.println("Up Short Press");
 
@@ -237,10 +243,11 @@ void loop() {
   }
   servo1.detach();  // Stop the rotation
   while (upLongPressActive == true) {
+    // This uses  the Long Press Active above. If it's active, roll up until it's let go.
     servo1.attach(servoPin);
     //Serial.println("Up pressed");
     servo1.write(0);  // Values below 90 rotate one way, values above 90 rotate the other
-    yield();
+    yield(); // only to feed the watchdog
     if(digitalRead(buttonUp) == 1) {
       upLongPressActive = false;
       upButtonActive = false;
@@ -250,7 +257,7 @@ void loop() {
 
 
 
-// Down
+// Down, same as up. No need to comment everything that is the same but reversed.
 if (digitalRead(buttonDown) == 0) {
     if (downButtonActive == false) {
       downButtonActive = true;
@@ -263,21 +270,14 @@ if (digitalRead(buttonDown) == 0) {
   } else {
 
     if (downButtonActive == true) {
-
       if (downLongPressActive == true) {
-
         downLongPressActive = false;
-
       } else {
         mqttclient.publish("/inside/bedroom/cover/set", "1");
         Serial.println("down Short Press");
-
       }
-
       downButtonActive = false;
-
     }
-
   }
   servo1.detach();  // Stop the rotation
   while (downLongPressActive == true) {
@@ -294,6 +294,8 @@ if (digitalRead(buttonDown) == 0) {
 
 
   // Time to report movement data to MQTT server
+  // I'm getting detections even when nobody is in the room, but only for very short times. 
+  // TODO: reliably report motion. Possibly set minimum time for positive detection to a second or so? Maybe 100sm?
   //if (millis() - previousDetectorMillis < DetectorchangeInterval) {
   currentDetectorValue = digitalRead(movementSensor);
     if (currentDetectorValue != previousDetectorValue) {
