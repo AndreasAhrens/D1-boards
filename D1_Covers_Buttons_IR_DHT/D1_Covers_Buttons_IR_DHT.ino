@@ -1,3 +1,4 @@
+#include <eBtn.h>
 #include <Servo.h>
 #include <ESP8266WiFi.h>
 #include <DNSServer.h>
@@ -14,10 +15,10 @@
   #define DHTPIN 16     // what pin DHT is connected to
   #define DHTTYPE DHT22   // DHT 22  (AM2302)
   DHT dht(DHTPIN, DHTTYPE);
+
+
   String temp_str;
   char temp_char[50];
-  String hum_str;
-  char hum_char[50];
 
   // Buttons
   //int goodNight = 4;
@@ -25,8 +26,14 @@
   int movementSensor = 12; 
   int buttonUp= 5 ; // define the button pin
   int buttonDown = 4;
-  int pressUp = 0;
-  int pressDown = 0;
+
+  eBtn btnUp = eBtn(buttonUp);
+  eBtn btnDown = eBtn(buttonDown);
+  float n;
+  float sinceN;
+  
+  //int pressUp = 0;
+  //int pressDown = 0;
   boolean coverStatus = false;
   boolean justStarted = true;
 
@@ -37,7 +44,7 @@
   PubSubClient mqttclient(client);
 
    
-  char msg[50];
+  //char msg[50];
   unsigned long startMillis = 0;
   const long upInterval = 13000;    // Time to roll up curtain, 13 seconds
   const long downInterval = 11210;  // Time to roll down curtain, lower since down uses less power
@@ -45,22 +52,21 @@
   // Motion detector 
   int previousDetectorValue = 0; // Initial status for previous value
   int currentDetectorValue = 1;  // Initial status for current value 
-  String detector_str;
-  char detector_char[50];
+  
+  int direction = 0;
  
+ // Long and short press detection with timings
+
+  boolean buttonActive = false;
+  boolean longPressActive = false;
+  long buttonTimer = 0;
+  long longPressTime = 250;
+
+  int servoValue = 0;
 
 
-  // Long and short press detection with timings
-  boolean upButtonActive = false;
-  boolean upLongPressActive = false;
-  long upButtonTimer = 0;
-  long upLongPressTime = 250;
-
-  boolean downButtonActive = false;
-  boolean downLongPressActive = false;
-  long downButtonTimer = 0;
-  long downLongPressTime = 250;
-
+//  String temp_str;
+//  char temp_char[50];
 
 void setup() {
   // put your setup code here, to run once:
@@ -75,7 +81,17 @@ void setup() {
   pinMode(buttonUp, INPUT_PULLUP);
   pinMode(buttonDown, INPUT_PULLUP);
   pinMode(movementSensor, INPUT);
-
+  btnUp.on("press",pressUpFunc);
+  btnDown.on("press",pressDownFunc);
+  btnUp.on("release",releaseUpFunc);
+  btnDown.on("release",releaseDownFunc);
+  btnUp.on("hold",holdUpFunc);
+  btnUp.on("long",longUpPressFunc);
+  btnDown.on("hold",holdDownFunc);
+  btnDown.on("long",longDownPressFunc);
+  
+  attachInterrupt(buttonUp, pinUp_ISR, CHANGE);
+  attachInterrupt(buttonDown, pinDown_ISR, CHANGE);
 
   // Attach the servo and set initial status
   servo1.attach(servoPin);
@@ -86,6 +102,89 @@ void setup() {
   
 }
 
+void pinUp_ISR(){
+  btnUp.handle();
+}
+void pinDown_ISR(){
+  btnDown.handle();
+}
+
+void longUpPressFunc(){
+  Serial.println("Btn released after a long press of " + String((millis()-n) /1000) + " seconds");  
+  servo1.detach();
+  longPressActive = false;
+  n = 0;
+}
+
+void holdUpFunc(){
+  Serial.println("Btn hold for: " + String((millis()-n) /1000) + " seconds");
+  //servo1.detach();
+  //n = 0;
+}
+
+void longDownPressFunc(){
+  Serial.println("Btn released after a long press of " + String((millis()-n) /1000) + " seconds");  
+  servo1.detach();
+  longPressActive = false;
+  n = 0;
+}
+
+void holdDownFunc(){
+  Serial.println("Btn hold for: " + String((millis()-n) /1000) + " seconds");
+  //servo1.detach();
+  //n = 0;
+}
+
+void pressUpFunc(){
+  n = millis();
+  direction = 0;
+  Serial.println("Up button pressed");
+}
+
+void releaseUpFunc(){ 
+  Serial.println("Btn released after " + String((millis()-n) /1000) + " seconds");
+  longPressActive = false;
+  buttonActive = false;
+  servo1.detach();
+  n = 0;
+}
+
+void pressDownFunc(){
+  n = millis();
+  direction = 1;
+  Serial.println("Down button pressed");
+}
+
+void releaseDownFunc(){ 
+  Serial.println("Btn released after " + String((millis()-n) /1000) + " seconds");
+  longPressActive = false;
+  buttonActive = false;
+  servo1.detach();
+  n = 0;
+}
+
+
+void packDataForMQTT (int inputValue) {
+  
+  temp_str = String(inputValue); //converting to string
+  temp_str.toCharArray(temp_char, temp_str.length() + 1); //packaging up the data in order to publish to MQTT
+}
+
+void sustainedMotion () {
+  servo1.attach(servoPin);
+  servoValue = direction * 180;
+  servo1.write(servoValue);  // Values below 90 rotate one way, values above 90 rotate the other  
+}
+
+void sendMQTT () {
+  Serial.println("Here we print the MQTT message");
+  buttonActive = true;
+  packDataForMQTT(direction);
+  Serial.print("Direction: ");
+  Serial.println(direction);
+  mqttclient.publish("/inside/bedroom/cover/set", temp_char);
+}
+ 
 void callback(char* topic, byte* payload, unsigned int length) {
   Serial.print("Message arrived [");
   Serial.print(topic); // For troubleshooting
@@ -166,8 +265,38 @@ void reconnect() {
 
 void loop() {
   mqttclient.loop(); // Do the MQTT loop
-  pressUp = digitalRead(buttonUp); // Set pressUp to the vlaue of button Up. Same below for Down.
-  pressDown = digitalRead(buttonDown);
+  if (!client.connected()) {
+    reconnect();
+  }
+  
+  sinceN = millis() - n;
+  if (n != 0 && sinceN > longPressTime && longPressActive == false) {
+    if (sinceN > longPressTime) {
+      //Serial.print("Milliseconds since N: ");
+      //Serial.println(sinceN);
+      longPressActive = true;
+      yield();
+      sustainedMotion();
+    }
+  } 
+  else if (buttonActive == false) {
+      sendMQTT();
+  }
+
+
+  // Time to report movement data to MQTT server
+  // I'm getting detections even when nobody is in the room, but only for very short times. 
+  // TODO: reliably report motion. Possibly set minimum time for positive detection to a second or so? Maybe 100sm?
+  //if (millis() - previousDetectorMillis < DetectorchangeInterval) {
+  currentDetectorValue = digitalRead(movementSensor);
+    if (currentDetectorValue != previousDetectorValue) {
+      packDataForMQTT(currentDetectorValue);
+      mqttclient.publish("/inside/bedroom/movement/", temp_char);
+      Serial.print("Sensor value: ");
+      Serial.println(currentDetectorValue);
+      previousDetectorValue = currentDetectorValue;
+    }
+
 
   // Humidity and temperature init
   // The damn DHT doesn't work for some reason, so comment out until I have time to fix.
@@ -192,9 +321,7 @@ void loop() {
   Serial.print(t);
   Serial.print(" *C ");
 */
-  if (!client.connected()) {
-    reconnect();
-  }
+  
   /*
   temp_str = String(t); //converting to string
   temp_str.toCharArray(temp_char, temp_str.length() + 1); //packaging up the data in order to publish to MQTT
@@ -206,113 +333,7 @@ void loop() {
   Serial.print("Humidity ");
   Serial.println(hum_char);
   */
+  // Let's try to call the new function and see if it works.
 
-  // If the Up button is pressed (registers as 0 for some reason), run this if.
-  if (digitalRead(buttonUp) == 0) {
-    if (upButtonActive == false) {
-      upButtonActive = true;
-      upButtonTimer = millis();
-      // If not set as active, do that, and record start time to detect if press is long or short.
-    }
-    if ((millis() - upButtonTimer > upLongPressTime) && (upLongPressActive == false)) {
-      // If the time it has been active is longer than the upLongPressTime, register as long press
-      upLongPressActive = true;
-      Serial.println("Up Long Press");
-    }
-  } else {
-
-    if (upButtonActive == true) {
-      // If button is active and long press is active, set long press active to false
-      if (upLongPressActive == true) {
-
-        upLongPressActive = false;
-
-      } else {
-        // If not, it's short press. Publish to MQTT. 
-        // All actions are done via MQTT rather than directly so we can treat commands from buttons and 
-        // Home Assistant the same and reduce complexity. Downside - reliant on MQTT server being up.
-        mqttclient.publish("/inside/bedroom/cover/set", "0");
-        Serial.println("Up Short Press");
-
-      }
-
-      upButtonActive = false;
-
-    }
-
-  }
-  servo1.detach();  // Stop the rotation
-  while (upLongPressActive == true) {
-    // This uses  the Long Press Active above. If it's active, roll up until it's let go.
-    servo1.attach(servoPin);
-    //Serial.println("Up pressed");
-    servo1.write(0);  // Values below 90 rotate one way, values above 90 rotate the other
-    yield(); // only to feed the watchdog
-    if(digitalRead(buttonUp) == 1) {
-      upLongPressActive = false;
-      upButtonActive = false;
-    }
-  }
-  servo1.detach();  // Stop the rotation
-
-
-
-// Down, same as up. No need to comment everything that is the same but reversed.
-if (digitalRead(buttonDown) == 0) {
-    if (downButtonActive == false) {
-      downButtonActive = true;
-      downButtonTimer = millis();
-    }
-    if ((millis() - downButtonTimer > downLongPressTime) && (downLongPressActive == false)) {
-      downLongPressActive = true;
-      //Serial.println("down Long Press");
-    }
-  } else {
-
-    if (downButtonActive == true) {
-      if (downLongPressActive == true) {
-        downLongPressActive = false;
-      } else {
-        mqttclient.publish("/inside/bedroom/cover/set", "1");
-        Serial.println("down Short Press");
-      }
-      downButtonActive = false;
-    }
-  }
-  servo1.detach();  // Stop the rotation
-  while (downLongPressActive == true) {
-    servo1.attach(servoPin);
-    //Serial.println("down pressed");
-    servo1.write(180);  // Values below 90 rotate one way, values above 90 rotate the other
-    yield();
-    if(digitalRead(buttonDown) == 1) {
-      downLongPressActive = false;
-      downButtonActive = false;
-    }
-  }
-  servo1.detach();  // Stop the rotation
-
-
-  // Time to report movement data to MQTT server
-  // I'm getting detections even when nobody is in the room, but only for very short times. 
-  // TODO: reliably report motion. Possibly set minimum time for positive detection to a second or so? Maybe 100sm?
-  //if (millis() - previousDetectorMillis < DetectorchangeInterval) {
-  currentDetectorValue = digitalRead(movementSensor);
-    if (currentDetectorValue != previousDetectorValue) {
-      detector_str = String(currentDetectorValue); //converting to string
-      detector_str.toCharArray(detector_char, detector_str.length() + 1); //packaging up the data in order to publish to MQTT
-      mqttclient.publish("/inside/bedroom/movement/", detector_char);
-      Serial.print("Sensor value: ");
-      Serial.println(currentDetectorValue);
-      previousDetectorValue = currentDetectorValue;
-    }
-
-    
-  //}
-  
-  //val = digitalRead(button);
-  //Serial.println(val);
-
-  //delay(100);
 
 }
