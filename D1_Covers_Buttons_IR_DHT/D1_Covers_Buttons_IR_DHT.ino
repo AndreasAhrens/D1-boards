@@ -19,6 +19,7 @@
   // Networks & MQTT
   const char* mqtt_server = "192.168.31.68"; 
   // This is my MQTT server, your IP will most likely be different
+  // Set separate MQTT client name for each node
   const char* mqtt_client = "Bedroom_Sensor_1";
   
   // Buttons
