@@ -9,7 +9,7 @@
 
 
 
-const char* mqtt_server = "192.168.31.68"; 
+const char* mqtt_server = "192.168.1.68"; 
 const char* mqtt_name = "Plant watering";
 // This is my MQTT server, your IP will most likely be different
 WiFiClient client;
